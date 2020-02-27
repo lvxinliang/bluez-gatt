@@ -42,6 +42,7 @@
 #include "src/shared/timeout.h"
 #include "src/shared/gatt-db.h"
 #include "src/shared/gatt-server.h"
+#include "device_adv.h"
 
 #define UUID_GAP			0x1800
 #define UUID_GATT			0x1801
@@ -690,6 +691,11 @@ static int l2cap_le_att_listen_and_accept(bdaddr_t *src, int sec,
 	}
 
 	printf("Started listening on ATT channel. Waiting for connections\n");
+
+	/* 启动广播 */
+	app_hci_no_le_adv();
+	app_hci_le_set_advertising_data();
+	app_hci_le_adv();
 
 	memset(&addr, 0, sizeof(addr));
 	optlen = sizeof(addr);
