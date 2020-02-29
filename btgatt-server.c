@@ -85,6 +85,7 @@ struct server {
 	uint8_t *device_name;
 	size_t name_len;
 
+	uint16_t mtu;
 	uint16_t gatt_svc_chngd_handle;
 	bool svc_chngd_enabled;
 
@@ -97,6 +98,7 @@ struct server {
 	unsigned int hr_timeout_id;
 };
 
+static int sec = BT_SECURITY_LOW;
 static void print_prompt(void)
 {
 	printf(COLOR_BLUE "[GATT server]" COLOR_OFF "# ");
@@ -107,7 +109,10 @@ static void att_disconnect_cb(int err, void *user_data)
 {
 	printf("Device disconnected: %s\n", strerror(err));
 
-	mainloop_quit();
+	/* 启动广播 */
+	app_hci_no_le_adv();
+	app_hci_le_set_advertising_data();
+	app_hci_le_adv();
 }
 
 static void att_debug_cb(const char *str, void *user_data)
@@ -625,23 +630,6 @@ static struct server *server_create(int fd, uint16_t mtu, bool hr_visible)
 		return NULL;
 	}
 
-	server->att = bt_att_new(fd, false);
-	if (!server->att) {
-		fprintf(stderr, "Failed to initialze ATT transport layer\n");
-		goto fail;
-	}
-
-	if (!bt_att_set_close_on_unref(server->att, true)) {
-		fprintf(stderr, "Failed to set up ATT transport layer\n");
-		goto fail;
-	}
-
-	if (!bt_att_register_disconnect(server->att, att_disconnect_cb, NULL,
-									NULL)) {
-		fprintf(stderr, "Failed to set ATT disconnect handler\n");
-		goto fail;
-	}
-
 	server->name_len = name_len + 1;
 	server->device_name = malloc(name_len + 1);
 	if (!server->device_name) {
@@ -652,26 +640,14 @@ static struct server *server_create(int fd, uint16_t mtu, bool hr_visible)
 	memcpy(server->device_name, test_device_name, name_len);
 	server->device_name[name_len] = '\0';
 
-	server->fd = fd;
 	server->db = gatt_db_new();
 	if (!server->db) {
 		fprintf(stderr, "Failed to create GATT database\n");
 		goto fail;
 	}
-
-	server->gatt = bt_gatt_server_new(server->db, server->att, mtu, 0);
-	if (!server->gatt) {
-		fprintf(stderr, "Failed to create GATT server\n");
-		goto fail;
-	}
-
 	server->hr_visible = hr_visible;
 
-	if (verbose) {
-		bt_att_set_debug(server->att, att_debug_cb, "att: ", NULL);
-		bt_gatt_server_set_debug(server->gatt, gatt_debug_cb,
-							"server: ", NULL);
-	}
+	server->mtu = mtu;
 
 	/* Random seed for generating fake Heart Rate measurements */
 	srand(time(NULL));
@@ -724,6 +700,54 @@ static struct option main_options[] = {
 	{ }
 };
 
+static int l2cap_le_att_listen(bdaddr_t *src, int sec,
+							uint8_t src_type)
+{
+	int sk, nsk;
+	struct sockaddr_l2 srcaddr, addr;
+	socklen_t optlen;
+	struct bt_security btsec;
+	char ba[18];
+
+	sk = socket(PF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
+	if (sk < 0) {
+		perror("Failed to create L2CAP socket");
+		return -1;
+	}
+
+	/* Set up source address */
+	memset(&srcaddr, 0, sizeof(srcaddr));
+	srcaddr.l2_family = AF_BLUETOOTH;
+	srcaddr.l2_cid = htobs(ATT_CID);
+	srcaddr.l2_bdaddr_type = src_type;
+	bacpy(&srcaddr.l2_bdaddr, src);
+
+	if (bind(sk, (struct sockaddr *) &srcaddr, sizeof(srcaddr)) < 0) {
+		perror("Failed to bind L2CAP socket");
+		goto fail;
+	}
+
+	/* Set the security level */
+	memset(&btsec, 0, sizeof(btsec));
+	btsec.level = sec;
+	if (setsockopt(sk, SOL_BLUETOOTH, BT_SECURITY, &btsec,
+							sizeof(btsec)) != 0) {
+		fprintf(stderr, "Failed to set L2CAP security level\n");
+		goto fail;
+	}
+
+	if (listen(sk, 10) < 0) {
+		perror("Listening on socket failed");
+		goto fail;
+	}
+
+	printf("Started listening on ATT channel. Waiting for connections\n");
+	return sk;
+
+fail:
+	close(sk);
+	return -1;
+}
 static int l2cap_le_att_listen_and_accept(bdaddr_t *src, int sec,
 							uint8_t src_type)
 {
@@ -766,11 +790,6 @@ static int l2cap_le_att_listen_and_accept(bdaddr_t *src, int sec,
 	}
 
 	printf("Started listening on ATT channel. Waiting for connections\n");
-
-	/* 启动广播 */
-	app_hci_no_le_adv();
-	app_hci_le_set_advertising_data();
-	app_hci_le_adv();
 
 	memset(&addr, 0, sizeof(addr));
 	optlen = sizeof(addr);
@@ -1199,6 +1218,69 @@ failed:
 	free(line);
 }
 
+static int gatt_conn_new(int fd, struct server *server)
+{
+	server->att = bt_att_new(fd, false);
+	if (!server->att) {
+		printf("Failed to initialze ATT transport layer\n");
+		return -1;
+	}
+
+	bt_att_set_close_on_unref(server->att, true);
+	/*I do not find the reason why it cause bus error when run though call back funnction gatt_conn_disconnect.
+	  when i follow into the bluez stack, the function  queue_foreach() is much realeated.
+	  the struct queue and the disconn_handler maybe the suspect*/
+	//bt_att_register_disconnect(conn->att, gatt_conn_disconnect, conn, NULL);
+
+	if (!bt_att_register_disconnect(server->att, att_disconnect_cb, NULL,
+				NULL)) {
+		printf("Failed to set ATT disconnect handler\n");
+		goto fail;
+	}
+
+	bt_att_set_security(server->att, sec);
+
+	server->gatt = bt_gatt_server_new(server->db, server->att, server->mtu, 0);
+	if (!server->gatt) {
+		printf("Failed to create GATT server\n");
+		goto fail;
+	}
+	return 0;
+fail:
+	bt_att_unref(server->att);
+	return -1;
+}
+
+static void new_connect_cb(int fd, uint32_t events, void *user_data)
+{
+	struct sockaddr_l2 addr;
+	socklen_t addrlen;
+	int new_fd;
+	struct server *server = (struct server*)user_data;
+
+	printf("GATT New device connected\n");
+
+	if (events & (EPOLLERR | EPOLLHUP)) {
+		mainloop_remove_fd(fd);
+		return;
+	}
+	memset(&addr, 0, sizeof(addr));
+	addrlen = sizeof(addr);
+
+	new_fd = accept(fd, (struct sockaddr *) &addr, &addrlen);
+	if (new_fd < 0) {
+		printf("Failed to accept new ATT connection\n");
+		return;
+	}
+
+	server->fd = fd;
+	if(gatt_conn_new(new_fd, server)) {
+		printf("Failed to create GATT connection\n");
+		close(new_fd);
+		return;
+	}
+}
+
 static void signal_cb(int signum, void *user_data)
 {
 	switch (signum) {
@@ -1216,10 +1298,10 @@ int main(int argc, char *argv[])
 	int opt;
 	bdaddr_t src_addr;
 	int dev_id = -1;
-	int fd;
+	int listen_fd;
 	int sec = BT_SECURITY_LOW;
 	uint8_t src_type = BDADDR_LE_PUBLIC;
-	uint16_t mtu = 0;
+	uint16_t mtu = 128;
 	sigset_t mask;
 	bool hr_visible = false;
 	struct server *server;
@@ -1306,25 +1388,28 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	fd = l2cap_le_att_listen_and_accept(&src_addr, sec, src_type);
-	if (fd < 0) {
-		fprintf(stderr, "Failed to accept L2CAP ATT connection\n");
+	/* 启动广播 */
+	app_hci_no_le_adv();
+	app_hci_le_set_advertising_data();
+	app_hci_le_adv();
+
+	server = server_create(0, mtu, hr_visible);
+	if (!server) {
+		return EXIT_FAILURE;
+    }
+
+	listen_fd = l2cap_le_att_listen(&src_addr, sec, src_type);
+	if (listen_fd < 0) {
+		fprintf(stderr, "Failed to listen L2CAP ATT connection\n");
 		return EXIT_FAILURE;
 	}
 
 	mainloop_init();
 
-	server = server_create(fd, mtu, hr_visible);
-	if (!server) {
-		close(fd);
-		return EXIT_FAILURE;
-	}
-
-	if (mainloop_add_fd(fileno(stdin),
-				EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR,
-				prompt_read_cb, server, NULL) < 0) {
-		fprintf(stderr, "Failed to initialize console\n");
-		server_destroy(server);
+	if (mainloop_add_fd(listen_fd,
+				EPOLLIN,
+				new_connect_cb, server, NULL) < 0) {
+		fprintf(stderr, "Failed to initialize new connect\n");
 
 		return EXIT_FAILURE;
 	}
