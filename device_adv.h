@@ -1,6 +1,6 @@
 #ifndef __DEVICE_ADV__
 #define __DEVICE_ADV__
-#define DEVICE_NAME "lxl_abc"
+#define DEVICE_NAME "lxl_raspberry"
 
 int app_hci_le_adv();
 

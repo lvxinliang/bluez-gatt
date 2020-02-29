@@ -73,8 +73,7 @@
 #define COLOR_BOLDGRAY	"\x1B[1;30m"
 #define COLOR_BOLDWHITE	"\x1B[1;37m"
 
-static const char test_device_name[] = "Very Long Test Device Name For Testing "
-				"ATT Protocol Operations On GATT Server";
+static const char test_device_name[] = DEVICE_NAME;
 static bool verbose = false;
 
 struct server {
@@ -533,11 +532,86 @@ static void populate_hr_service(struct server *server)
 		gatt_db_service_set_active(service, true);
 }
 
+#define UUID_PROVISION_SERVICE 0x1F20
+#define UUID_PROVISION_CHAR 0x1F30
+#define UUID_NET_ADDR_CHAR 0x1F40
+static void provision_write_cb(struct gatt_db_attribute *attrib,
+					unsigned int id, uint16_t offset,
+					const uint8_t *value, size_t len,
+					uint8_t opcode, struct bt_att *att,
+					void *user_data)
+{
+	struct server *server = user_data;
+	uint8_t ecode = 0;
+
+	if (!value || len < 1) {
+		ecode = BT_ATT_ERROR_INVALID_ATTRIBUTE_VALUE_LEN;
+		goto done;
+	}
+
+	if (offset) {
+		ecode = BT_ATT_ERROR_INVALID_OFFSET;
+		goto done;
+	}
+	char *provision_info = (char *)malloc(len + 1);
+	memset(provision_info, 0, len + 1);
+	memcpy(provision_info, value, len);
+	printf("provision info: %s\n", provision_info);
+	ecode = connect_wifi_by_str(provision_info);
+	free(provision_info);
+
+done:
+	gatt_db_attribute_write_result(attrib, id, ecode);
+}
+static void populate_provison_service(struct server *server)
+{
+	bt_uuid_t uuid;
+	struct gatt_db_attribute *service, *hr_msrmt, *body;
+
+	/* Add Provision Service */
+	bt_uuid16_create(&uuid, UUID_PROVISION_SERVICE);
+	service = gatt_db_add_service(server->db, &uuid, true, 8);
+	server->hr_handle = gatt_db_attribute_get_handle(service);
+
+	/* Provision Characteristic */
+	bt_uuid16_create(&uuid, UUID_PROVISION_CHAR);
+	hr_msrmt = gatt_db_service_add_characteristic(service, &uuid,
+						BT_ATT_PERM_WRITE,
+						BT_GATT_CHRC_PROP_WRITE,
+						NULL, provision_write_cb, server);
+	server->hr_msrmt_handle = gatt_db_attribute_get_handle(hr_msrmt);
+
+	bt_uuid16_create(&uuid, GATT_CLIENT_CHARAC_CFG_UUID);
+	gatt_db_service_add_descriptor(service, &uuid,
+					BT_ATT_PERM_READ | BT_ATT_PERM_WRITE,
+					hr_msrmt_ccc_read_cb,
+					hr_msrmt_ccc_write_cb, server);
+
+	/*
+	 * Net Address read Characteristic
+	 */
+	char address[128] = {0};
+	get_wlan_address(address);
+	bt_uuid16_create(&uuid, UUID_NET_ADDR_CHAR);
+	body = gatt_db_service_add_characteristic(service, &uuid,
+						BT_ATT_PERM_READ,
+						BT_GATT_CHRC_PROP_READ,
+						NULL, NULL, server);
+	gatt_db_attribute_write(body, 0, (void *) address, strlen(address),
+							BT_ATT_OP_WRITE_REQ,
+							NULL, confirm_write,
+							NULL);
+
+
+	gatt_db_service_set_active(service, true);
+}
+
 static void populate_db(struct server *server)
 {
 	populate_gap_service(server);
 	populate_gatt_service(server);
 	populate_hr_service(server);
+	populate_provison_service(server);
 }
 
 static struct server *server_create(int fd, uint16_t mtu, bool hr_visible)

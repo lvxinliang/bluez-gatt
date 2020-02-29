@@ -33,4 +33,21 @@ int get_wlan_address(char *address)
     return 0;
 }
 
+int connect_wifi_by_str(char *str)
+{
+    int i = 0;
+    for (i = 0; i < strlen(str); i++)
+    {
+        if (str[i] == ',')
+        {
+            str[i] = ' ';
+            break;
+        }
+    }
+    char cmd[256] = {0};
+    sprintf(cmd, "connect_wifi.sh %s", str);
+    printf("connect wifi cmd:%s \n", cmd);
+    return system(cmd);
+}
+
 #endif

@@ -13,4 +13,5 @@
 
 int get_wlan_address(char *address);
 
+int connect_wifi_by_str(char *str);
 #endif
