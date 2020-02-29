@@ -43,6 +43,7 @@
 #include "src/shared/gatt-db.h"
 #include "src/shared/gatt-server.h"
 #include "device_adv.h"
+#include "util.h"
 
 #define UUID_GAP			0x1800
 #define UUID_GATT			0x1801

@@ -18,7 +18,7 @@ target_link_libraries(btgatt-client bluetooth shared)
 
 # btgatt-server
 add_executable(btgatt-server
-    btgatt-server.c device_adv.c)
+    btgatt-server.c device_adv.c util.c)
 
 target_link_libraries(btgatt-server bluetooth shared)
 
