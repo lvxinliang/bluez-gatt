@@ -1,0 +1,24 @@
+#!/bin/sh 
+#/etc/init.d/provision_device 
+### BEGIN INIT INFO 
+# Provides:Nick 
+# Required-Start:$remote_fs $syslog 
+# Required-Stop:$remote_fs $syslog 
+# Default-Start:2 3 4 5 
+# Default-Stop:0 1 6 
+# Short-Description: provision_device 
+# Description: This service is used to start my applaction 
+### END INIT INFO 
+case "$1" in      
+start)      
+    sudo /usr/bin/btgatt-server > /tmp/provision_device.log 2>&1 &
+    ;;
+stop)      
+    sudo killall btgatt-server
+    ;;      
+*)      
+    echo "Usage: service script_test start|stop"      
+    exit 1      
+    ;; 
+esac 
+exit 0

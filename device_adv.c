@@ -265,3 +265,21 @@ int app_hci_le_set_advertising_data()
 
     return 0;
 }
+
+int start_provision_adv()
+{
+    int code = 0;
+    code = app_hci_no_le_adv();
+    if (code)
+    {
+        goto fail;
+    }
+    code = app_hci_le_set_advertising_data();
+    if (code)
+    {
+        goto fail;
+    }
+    code = app_hci_le_adv();
+fail:
+    return code;
+}

@@ -51,6 +51,9 @@ int connect_wifi_by_str(char *str)
     sprintf(cmd, "wpa_cli -i wlan0 enable_network 0");
     printf("cmd:%s\n", cmd);
     system(cmd);
+    sprintf(cmd, "wpa_cli -i wlan0 reconfigure");
+    printf("cmd:%s\n", cmd);
+    system(cmd);
     return 0;
 }
 

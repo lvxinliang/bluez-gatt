@@ -110,9 +110,7 @@ static void att_disconnect_cb(int err, void *user_data)
 	printf("Device disconnected: %s\n", strerror(err));
 
 	/* 启动广播 */
-	app_hci_no_le_adv();
-	app_hci_le_set_advertising_data();
-	app_hci_le_adv();
+	start_provision_adv();
 }
 
 static void att_debug_cb(const char *str, void *user_data)
@@ -1389,9 +1387,15 @@ int main(int argc, char *argv[])
 	}
 
 	/* 启动广播 */
-	app_hci_no_le_adv();
-	app_hci_le_set_advertising_data();
-	app_hci_le_adv();
+	while(1)
+	{
+		sleep(2);
+		printf("wait for start provision adv...\n");
+		if(!start_provision_adv())
+		{
+			break;
+		}
+	}
 
 	server = server_create(0, mtu, hr_visible);
 	if (!server) {
