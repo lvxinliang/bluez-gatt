@@ -566,6 +566,18 @@ static void provision_write_cb(struct gatt_db_attribute *attrib,
 done:
 	gatt_db_attribute_write_result(attrib, id, ecode);
 }
+
+static void net_address_read_cb(struct gatt_db_attribute *attrib,
+								unsigned int id, uint16_t offset,
+								uint8_t opcode, struct bt_att *att,
+								void *user_data)
+{
+	struct server *server = user_data;
+	char address[128] = {0};
+	get_wlan_address(address);
+	gatt_db_attribute_read_result(attrib, id, 0, address, strlen(address));
+}
+
 static void populate_provison_service(struct server *server)
 {
 	bt_uuid_t uuid;
@@ -599,7 +611,7 @@ static void populate_provison_service(struct server *server)
 	body = gatt_db_service_add_characteristic(service, &uuid,
 						BT_ATT_PERM_READ,
 						BT_GATT_CHRC_PROP_READ,
-						NULL, NULL, server);
+						net_address_read_cb, NULL, server);
 	gatt_db_attribute_write(body, 0, (void *) address, strlen(address),
 							BT_ATT_OP_WRITE_REQ,
 							NULL, confirm_write,
